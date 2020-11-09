@@ -1,0 +1,157 @@
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  Budgets:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetLimit:
+          Amount: !Ref BudgetAmount
+          Unit: USD
+        BudgetType: COST
+        TimeUnit: MONTHLY
+      NotificationsWithSubscribers:
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: ACTUAL
+            Threshold: !Ref BudgetThreshold
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - Address: !Ref TopicSNS
+              SubscriptionType: SNS
+  TopicSNS:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Send message to teams
+      Subscription:
+        - Endpoint: !GetAtt SendMessageToTeamsFunction.Arn
+          Protocol: lambda
+  TopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - budgets.amazonaws.com
+            Action:
+              - SNS:Publish
+            Resource: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${AWS::StackName}-TopicSNS-*'
+      Topics:
+        - !Ref TopicSNS
+  SendMessageToTeamsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: !Sub |
+          import json
+          import logging
+          import os
+          import urllib.request
+
+          TEAMS_HOOK_THRESHOLD_BUDGET_URL = os.getenv('TEAMS_HOOK_THRESHOLD_BUDGET_URL')
+          ACCOUNT_NAME = os.environ.get('ACCOUNT_NAME')
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.DEBUG)
+
+          def send_to_teams(message):
+              payload = {
+                  "themeColor": "e53935",
+              }
+              endpoint = TEAMS_HOOK_THRESHOLD_BUDGET_URL
+
+              if not endpoint:
+                  return False
+
+              try:
+                  decoded = json.loads(message)
+                  message = decoded['message'] + '\nPath: ' + decoded['path']
+              except:
+                  pass
+
+              payload['summary'] = message[0:50]
+              messages = []
+              max_length = 11 * 1024  # Avoid 12kb limit of web hook message. Set max length to 11kb for safe-guard.
+              last_i = 0
+              for i in range(0, len(message)):
+                  if len(json.dumps(message[last_i:i]).encode('utf-8')) > max_length:
+                      messages.append({"text": '<pre>' + message[last_i:i-1] + '</pre>', **payload})
+                      last_i = i-1
+              messages.append({"text": '<pre>' + message[last_i:] + '</pre>', **payload})
+
+              for data in messages:
+                  req = urllib.request.Request(endpoint, data=json.dumps(data).encode('utf8'),
+                                               headers={'content-type': 'application/json'})
+                  response = urllib.request.urlopen(req)
+                  print(response.read().decode('utf8'))
+
+          def lambda_handler(event, context):
+              message = ''
+              # get account name
+              if ACCOUNT_NAME:
+                  message += 'ACCOUNT NAME : ' + ACCOUNT_NAME + '\n'
+              message += event['Records'][0]['Sns']['Message']
+              send_to_teams(message)
+
+              return True
+      Environment:
+        Variables:
+          TEAMS_HOOK_THRESHOLD_BUDGET_URL: !Ref ThresholdBudgetUrl
+          ACCOUNT_NAME: !Ref AcountName
+      Description: 'When cost of aws account over than threshold budget, send message to teams'
+      Handler: 'index.lambda_handler'
+      Role: !GetAtt LambdaThresholdBudgetRole.Arn
+      Runtime: 'python3.7'
+      Timeout: 120
+  LambdaThresholdBudgetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: lambda-send-message-when-cost-over-than-threshold-budget-permissions
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-SendMessageToTeamsFunction-*:*'
+              - Effect: Allow
+                Action:
+                  - SNS:Publish
+                Resource: !Sub 'arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${AWS::StackName}-TopicSNS-*'
+  SendRequestTimeoutFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SendMessageToTeamsFunction
+      Action: 'lambda:InvokeFunction'
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref TopicSNS
+Parameters:
+  ThresholdBudgetUrl:
+    Type: String
+    Default: ''
+  BudgetAmount:
+    Type: Number
+    Default: 100
+  BudgetThreshold:
+    Type: Number
+    Default: 80
+  AcountName:
+    Type: String
+    Default: ''
