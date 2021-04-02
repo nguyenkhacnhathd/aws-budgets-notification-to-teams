@@ -18,6 +18,8 @@ Resources:
           Subscribers:
             - Address: !Ref TopicSNS
               SubscriptionType: SNS
+            - Address: !Ref ReceivedNotificationEmail
+              SubscriptionType: EMAIL
   TopicSNS:
     Type: AWS::SNS::Topic
     Properties:
@@ -155,3 +157,6 @@ Parameters:
   AcountName:
     Type: String
     Default: ''
+  ReceivedNotificationEmail:
+    Type: String
+    Default: 'nhatnk.otani@gmail.com'
