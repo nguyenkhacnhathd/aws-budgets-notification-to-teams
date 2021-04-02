@@ -2,11 +2,12 @@
 Send messages to Teams if your account costs exceed budget thresholds
 
 # Deploy to production
-./deploy.sh BudgetAmount=... BudgetThreshold=... ThresholdBudgetUrl=... AcountName=...
+./deploy.sh BudgetAmount=... BudgetThreshold=... ThresholdBudgetUrl=... AcountName=... ReceivedNotificationEmail=...
 - BudgetAmount : default value = $100
 - BudgetThreshold : default value = 80%
 - ThresholdBudgetUrl : web hook url of teams
 - AcountName : account name
+- ReceivedNotificationEmail : Email to receive notification of budget aws
 # Example 
 1. Run command : ./deploy.sh BudgetAmount=1 BudgetThreshold=80 ThresholdBudgetUrl=https://teams.microsoft.com/... AcountName=NhatNK
 2. Message of Teams:
